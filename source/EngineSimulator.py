@@ -19,10 +19,11 @@ class PersistentDict(collections.MutableMapping):
     def __init__(self, fileName):
         self.store = dict()
         self._fileName=fileName
-        self._readFromfile()
+#         self._readFromfile()
         
     def __del__(self):
-        self._writeTofile()
+        pass
+#         self._writeTofile()
         
     def __getitem__(self, key):
         return self.store[self.__keytransform__(key)]
@@ -55,7 +56,7 @@ class PersistentDict(collections.MutableMapping):
             json.dump(self.store, fp)    
 
 class EngineSimulator:
-    def __init__(self, nodeid, port=8000):
+    def __init__(self, nodeid, port=8000, zookeeperAddr='127.0.0.1:2181', kafkaAddr='localhost:9092'):
         self._nodeid=nodeid
         self._workTopics=[]
         self._ipAddress=("%s:%d"%(socket.gethostbyname(socket.gethostname()), port))
@@ -64,26 +65,44 @@ class EngineSimulator:
         # cache DBs
         self._localDbs={}
         # consumer
-        self._consumer = KafkaConsumer(bootstrap_servers='localhost:9092',
+        self._consumer = KafkaConsumer(bootstrap_servers=kafkaAddr,
                                        auto_offset_reset='earliest',
                                        consumer_timeout_ms=502,
                                        request_timeout_ms=501)
         # producer
-        self._producer = KafkaProducer(bootstrap_servers='localhost:9092')
+        self._producer = KafkaProducer(bootstrap_servers=kafkaAddr)
         # zookeeper client
-        self._zk = KazooClient(hosts='127.0.0.1:2181')
+        self._zk = KazooClient(hosts=zookeeperAddr)
         self._zk.start()
         
         # init engines hash ring
         self._enginesHashRing=EnginesHashRing.EnginesHashRing([])
+    
+    def __del__(self):
+        self._producer.close()
+        self._consumer.close()
+    
+    def zkRegister(self):
+        self._zk.ensure_path("/Engines/Registered")
+        self._zk.create(("/Engines/Registered/%s" % self._nodeName) , value=self._ipAddress, ephemeral=True)
+#         zk.delete(("/Engines/engine_%d" % self._nodeid))
+#         if zk.exists("/Engines"):
+#             data, stat = zk.get("/Engines")
+#             print("Version: %s, data: %s" % (stat.version, data.decode("utf-8")))
+#             children = zk.get_children("/Engines")
+#             print("There are %s children with names %s" % (len(children), children))
+#             for znode in children:
+#                 data, stat = zk.get("/Engines/%s"%znode)
+#                 print("Name: %s, Version: %s, data: %s" % (znode, stat.version, data.decode("utf-8")))
 
+    def zkWatch(self):
         # set watcher for new engines
-        @self._zk.ChildrenWatch("/Engines/Ready")
+        @self._zk.ChildrenWatch("/Engines/Registered")
         def watch_children(children):
             print("Engines are now: %s" % children)
             engines=[]
             for engineName in children:
-                data, stat = self._zk.get("/Engines/Ready/%s"%engineName)
+                data, stat = self._zk.get("/Engines/Registered/%s"%engineName)
                 print("Name: %s, Version: %s, data: %s" % (engineName, stat.version, data.decode("utf-8")))
                 engines.append(data)
             self._enginesHashRing=EnginesHashRing.EnginesHashRing(engines)
@@ -100,39 +119,21 @@ class EngineSimulator:
             # subscribe to new kafka topics
             allTopics=self._workTopics + backupTopics
             if len(allTopics) > 0:
+                self._consumer.unsubscribe()
                 self._consumer.subscribe(allTopics)
 
-            for topic in self._workTopics:
+            for topic in allTopics:
                 if topic not in self._localDbs:
                     self._localDbs[topic]=PersistentDict("%s_%s.json" % (self._ipAddress, topic))
-    
-    def __del__(self):
-        self._producer.close()
-        self._consumer.close()
-    
-#         for db in self._localDbs:
-#             self._localDbs[db].writeTofile()
+        
 
     def loadTopics(self):
         # build local DB from topics
         if len(self._workTopics) > 0:
             for msg in self._consumer:
                 act = json.loads(msg.value)
-                self._localDbs[msg.topic][act['user']]=msg
+                self._localDbs[msg.topic][act['user']]=msg.value
 #                 print(('READ:    %s: %s' % (msg.topic, msg.value)))
-
-    def zkRegister(self):
-        self._zk.ensure_path("/Engines/Registered")
-        self._zk.create(("/Engines/Registered/%s" % self._nodeName) , value=self._ipAddress, ephemeral=True)
-#         zk.delete(("/Engines/engine_%d" % self._nodeid))
-#         if zk.exists("/Engines"):
-#             data, stat = zk.get("/Engines")
-#             print("Version: %s, data: %s" % (stat.version, data.decode("utf-8")))
-#             children = zk.get_children("/Engines")
-#             print("There are %s children with names %s" % (len(children), children))
-#             for znode in children:
-#                 data, stat = zk.get("/Engines/%s"%znode)
-#                 print("Name: %s, Version: %s, data: %s" % (znode, stat.version, data.decode("utf-8")))
 
     def zkReady(self):
         self._zk.ensure_path("/Engines/Ready")
@@ -157,7 +158,7 @@ class EngineSimulator:
             topic=EnginesHashRing.user2topic(activity['user'])
             self._checkActivityUserSeq(activity, topic)
             self._updateCache()
-            self._persistCache()
+#             self._persistCache()
 
             jsonActivity=json.dumps(activity)
             self._producer.send(topic, jsonActivity)
@@ -169,7 +170,7 @@ class EngineSimulator:
                 self._localDbs[db]._writeTofile()
         
     def _updateCache(self):
-        pollList = self._consumer.poll(timeout_ms=0, max_records=100)
+        pollList = self._consumer.poll(timeout_ms=0, max_records=len(self._workTopics)*100)
         for tp in pollList:
             for msg in pollList[tp]:
                 dictActivity=json.loads(msg.value)
@@ -229,11 +230,14 @@ if __name__ == "__main__":
     # parse arguments
     argParser = argparse.ArgumentParser(description='Engine Simulator')
     argParser.add_argument('-p', '--port', help='port', default=8000, type=int)    
+    argParser.add_argument('-z', '--zookeeper', help='zookeeper', default='127.0.0.1:2181')    
+    argParser.add_argument('-k', '--kafka', help='kafka', default='localhost:9092')    
     args = argParser.parse_args(sys.argv[1:])
     
     # create engine simulator and load topics from kafka
-    engineSim=EngineSimulator(uuid.uuid4(), args.port)
+    engineSim=EngineSimulator(uuid.uuid4(), args.port, args.zookeeper, args.kafka)
     engineSim.zkRegister()
+    engineSim.zkWatch()
     engineSim.loadTopics()
     engineSim.zkReady()
     

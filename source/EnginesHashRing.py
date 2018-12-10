@@ -23,6 +23,12 @@ class EnginesHashRing(HashRing):
         engineAddress = self.get_node(key=topic)
         return engineAddress
     
+    def user2backupEngine(self, user):
+        topic=user2topic(user)
+        pos = self._get_pos(key=topic)
+        engineAddress = self._get_next_node(pos)
+        return engineAddress
+
     def workTopics2engine(self, engineIP):
         workTopics=[]
         for t in range(0, NUMBER_OF_TOPICS):

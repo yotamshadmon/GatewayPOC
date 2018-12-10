@@ -7,22 +7,28 @@ import argparse
 import sys
 from kazoo.client import KazooClient, KazooState
 import EnginesHashRing
+import logging
+from _cffi_backend import sizeof
+
+logging.basicConfig(level=logging.WARN)
+logger = logging.getLogger('NetProcSimulator')
+logger.setLevel(logging.DEBUG)
 
 class NetProcSimulator:
-    def __init__(self, port):
-        self._port=port
+    def __init__(self, zookeeperAddr='127.0.0.1:2181'):
         self._userSequence={}
+        self._readyEngines=[]
 
         # register to zookeeper
-        zk = KazooClient(hosts='127.0.0.1:2181')
+        zk = KazooClient(hosts=zookeeperAddr)
         # set connection state listener
         def my_listener(state):
             if state == KazooState.LOST:
-                print("ZK connection LOST")
+                logger.error("ZK connection LOST")
             elif state == KazooState.SUSPENDED:
-                print("ZK connection SUSPENDED")
+                logger.error("ZK connection SUSPENDED")
             else:
-                print("ZK connection CONNECTED")
+                logger.info("ZK connection CONNECTED")
         zk.add_listener(my_listener)
         zk.start()
         
@@ -30,25 +36,29 @@ class NetProcSimulator:
         self._enginesHashRing=EnginesHashRing.EnginesHashRing([])
 
         # set watcher for new engines
-        @zk.ChildrenWatch("/Engines/Ready")
-        def watch_children(children):
-            print("Engines are now: %s" % children)
+        @zk.ChildrenWatch("/Engines/Registered")
+        def watch_registered(regEngines):
+            logger.info("Registered engines are now: %s" % regEngines)
             engines=[]
-            for engineName in children:
-                data, stat = zk.get("/Engines/Ready/%s"%engineName)
-                print("Name: %s, Version: %s, data: %s" % (engineName, stat.version, data.decode("utf-8")))
+            for engineName in regEngines:
+                data, stat = zk.get("/Engines/Registered/%s"%engineName)
+                logger.info("Name: %s Registered, data: %s" % (engineName, data.decode("utf-8")))
                 engines.append(data)
             self._enginesHashRing=EnginesHashRing.EnginesHashRing(engines)
 
-    def sendActivity(self):
-        # generate activity
-        activity=self._randomActivity()
-        activityStr=json.dumps(activity)
-        reqBody=('activity=%s' % activityStr)
-        
-        # get engine address
-        engineAddress=self._enginesHashRing.user2engine(activity['user'])
-        if engineAddress != None:
+        # set watcher for new engines
+        @zk.ChildrenWatch("/Engines/Ready")
+        def watch_ready(readyEngines):
+            self._readyEngines=[]
+            logger.info("Ready engines are now: %s" % readyEngines)
+            for engineName in readyEngines:
+                data, stat = zk.get("/Engines/Ready/%s"%engineName)
+                logger.info("Name: %s Ready, data: %s" % (engineName, data.decode("utf-8")))
+                self._readyEngines.append(data)
+
+    def sendActivity(self, engineAddress, reqBody):
+        ret=False
+        if engineAddress != None and engineAddress in self._readyEngines:
             try:
                 conn = httplib.HTTPConnection(engineAddress)
                 
@@ -57,15 +67,35 @@ class NetProcSimulator:
                              body=reqBody,
                              headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/plain"})
                 response = conn.getresponse()
-#             print(response.reason)
+                ret=True
+#             logger.debug(response.reason)
             except httplib.HTTPException as httpExcept:
-                print(httpExcept)
+                logger.error(httpExcept)
             except httplib.NotConnected as httpExcept:
-                print(httpExcept)
+                logger.error(httpExcept)
             except:
-                print('HTTP exceptiion')
+                logger.error('HTTP exceptiion')
+        return ret
             
-        
+    def startSend(self):
+        while True:
+            if len(self._readyEngines) > 0:
+                # generate activity
+                activity=self._randomActivity()
+                activityStr=json.dumps(activity)
+                reqBody=('activity=%s' % activityStr)
+                # get engine address
+                engineAddress=self._enginesHashRing.user2engine(activity['user'])
+                # send activity request to engine
+                if self.sendActivity(engineAddress, reqBody) == False:
+                    logger.warn('Failed to send activity to engine: %s' % engineAddress)
+                    engineAddress=self._enginesHashRing.user2backupEngine(activity['user'])
+                    logger.warn('Sending to backup engine: %s' % engineAddress)
+                    if self.sendActivity(engineAddress, reqBody) == False:
+                        logger.error('Failed to send activity to BACKUP engine: %s' % engineAddress)
+                        self._userSequence[activity['user']]=self._userSequence[activity['user']] - 1
+                        time.sleep(0.5)
+                time.sleep(0.005)
 
     def _randomActivity(self):
             tanents=['ForcePoint', 'SkyFence', 'Melanox', 'LivePerson', 'NICE', 'SAP']
@@ -73,7 +103,7 @@ class NetProcSimulator:
             newActivity={}
             newActivity['ID']=uuid.uuid4().get_node()
             newActivity['tenant']=random.choice(tanents)
-            user=('user%d' % (random.randint(0, 10)))
+            user=('user%d' % (random.randint(0, 100)))
             newActivity['user']=user
             if user in self._userSequence:
                 self._userSequence[user]=self._userSequence[user] + 1
@@ -83,15 +113,14 @@ class NetProcSimulator:
             newActivity['action']=random.choice(actions)
             newActivity['ip']=("%d.%d.%d.%d" % (random.randint(1,255), random.randint(0,255), random.randint(0,255), random.randint(0,255)))
             newActivity['timestamp']=int(round(time.time() * 1000))
+            newActivity['payload']=('p'*2000)
             return newActivity
         
 if __name__ == "__main__":
     argParser = argparse.ArgumentParser(description='NetProc Simulator')
-    argParser.add_argument('-p', '--port', nargs='+', help='port', default=8000, type=int)
+    argParser.add_argument('-z', '--zookeeper', help='zookeeper', default='127.0.0.1:2181')    
     
     args = argParser.parse_args(sys.argv[1:])
 
-    nps = NetProcSimulator(args.port)
-    while True:
-        nps.sendActivity()
-        time.sleep(0.5)
+    nps = NetProcSimulator(args.zookeeper)
+    nps.startSend()

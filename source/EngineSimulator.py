@@ -14,6 +14,7 @@ import EnginesHashRing
 import random
 import time
 from cgi import log
+import Statistics
 
 #logging.basicConfig(level=logging.ERROR)
 logging.basicConfig(filename='engine.log', level=logging.ERROR)
@@ -62,6 +63,7 @@ class PersistentDict(collections.MutableMapping):
 
 class EngineSimulator:
     def __init__(self, nodeid, port=8000, zookeeperAddr='127.0.0.1:2181', kafkaAddr='localhost:9092', hostIP=''):
+        self._cadence=Statistics.Cadence()
         self._nodeid=nodeid
         self._workTopics=[]
         self._allTopics=[]
@@ -244,7 +246,7 @@ class EngineSimulator:
             logger.debug('Activity userSequence ERROR %d. prev seq:%d last seq: %d' % (pervSeq-(newSeq-1), pervSeq, newSeq))
             ret=False
             
-        if ret==False:
+        if ret==False and logger.getEffectiveLevel() == logging.DEBUG:
             logMsg={}
             logMsg['timestamp']=int(time.time()*1000)
             logMsg['text']="Activity userSequence ERROR"
@@ -269,13 +271,23 @@ class EngineSimulator:
             else:
                 logger.error('Received activity for topic not cached (not WORKING topic and not BACKUP topic). topic %s' % topic)
 
-            logMsg={}
-            logMsg['timestamp']=int(time.time()*1000)
-            logMsg['text']="User topic"
-            logMsg['engineID']=('%s'%self._nodeid)
-            logMsg['topic']=topic
-            logMsg['topicType']=topicType
-            self._producer.send('logging', json.dumps(logMsg))
+#             logMsg={}
+#             logMsg['timestamp']=int(time.time()*1000)
+#             logMsg['text']="User topic"
+#             logMsg['engineID']=('%s'%self._nodeid)
+#             logMsg['topic']=topic
+#             logMsg['topicType']=topicType
+#             self._producer.send('logging', json.dumps(logMsg))
+            if (self._cadence.inc() % 1000) == 0:
+                sec, count, cadence = self._cadence.getLastCadence()
+                logMsg={}
+                logMsg['timestamp']=int(time.time()*1000)
+                logMsg['text']="activities per sec"
+                logMsg['engineID']=('%s'%self._nodeid)
+                logMsg['seconds']=sec
+                logMsg['count']=count
+                logMsg['cadence']=cadence
+                self._producer.send('logging', json.dumps(logMsg))
 
             self._checkActivityUserSeq(activity, topic)
             self._updateCache()
@@ -287,7 +299,7 @@ class EngineSimulator:
             self._producer.send(topic, jsonActivity)
             logger.debug('WRITE:    %s: %s' % (topic, activity))
             self._activityProgress()
-            time.sleep(0.050)
+#             time.sleep(0.050)
             
     def _activityProgress(self):
         sys.stdout.write('\b')

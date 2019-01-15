@@ -97,7 +97,7 @@ class NetProcSimulator:
                         logger.error('Failed to send activity to BACKUP engine: %s' % engineAddress)
                         self._userSequence[activity['user']]=self._userSequence[activity['user']] - 1
                         time.sleep(0.5)
-                time.sleep(0.05)
+#                 time.sleep(0.05)
 
     def _randomActivity(self):
             tanents=['ForcePoint', 'SkyFence', 'Melanox', 'LivePerson', 'NICE', 'SAP']

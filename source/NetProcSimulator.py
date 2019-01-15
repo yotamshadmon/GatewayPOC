@@ -9,6 +9,7 @@ from kazoo.client import KazooClient, KazooState
 import EnginesHashRing
 import logging
 
+#logging.basicConfig(level=logging.ERROR)
 logging.basicConfig(filename='netproc.log', level=logging.ERROR)
 logger = logging.getLogger('NetProcSimulator')
 logger.setLevel(logging.INFO)

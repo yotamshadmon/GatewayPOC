@@ -5,26 +5,41 @@ from multiprocessing.pool import worker
 
 NUMBER_OF_TOPICS=10
 
-def user2topic(user):
-    userHash=int(uuid.uuid5(uuid.NAMESPACE_DNS, user.encode('utf-8')).get_node())
-    topic=userHash%NUMBER_OF_TOPICS
-    return ('t%d' % topic)
+# def user2topic(user):
+#     userHash=int(uuid.uuid5(uuid.NAMESPACE_DNS, user.encode('utf-8')).get_node())
+#     topic=userHash%NUMBER_OF_TOPICS
+#     return ('t%d' % topic)
     
+class TopicsHashRing(HashRing):
+    def __init__(self, numberOfTopics, **kwargs):
+        nodes = []
+        for t in range(0, numberOfTopics):
+            topic = ("t%d" % t)
+            nodes.append(topic)
+        HashRing.__init__(self, nodes, **kwargs)
+
+    def user2topic(self, user):
+        return self.get_node(key=user)
+
 class EnginesHashRing(HashRing):
     def __init__(self, nodes=None, **kwargs):
         HashRing.__init__(self, nodes, **kwargs)
+        self._topicsHashRing = TopicsHashRing(NUMBER_OF_TOPICS)
         
+    def user2topic(self, user):
+        return self._topicsHashRing.user2topic(user)
+
     def topic2engine(self, topic):
         topicStr=('t%d' % topic)
         return self.get_node(key=topicStr) 
 
     def user2engine(self, user):
-        topic=user2topic(user)
+        topic=self._topicsHashRing.user2topic(user)
         engineAddress = self.get_node(key=topic)
         return engineAddress
     
     def user2backupEngine(self, user):
-        topic=user2topic(user)
+        topic=self._topicsHashRing.user2topic(user)
         pos = self._get_pos(key=topic)
         engineAddress = self._get_next_node(pos)
         return engineAddress

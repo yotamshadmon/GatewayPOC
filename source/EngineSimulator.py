@@ -15,6 +15,7 @@ import random
 import time
 from cgi import log
 
+#logging.basicConfig(level=logging.ERROR)
 logging.basicConfig(filename='engine.log', level=logging.ERROR)
 logger = logging.getLogger('EngineSimulator')
 logger.setLevel(logging.INFO)
@@ -258,7 +259,7 @@ class EngineSimulator:
         
     def ProcessActivity(self, activity):
             topicType='N'
-            topic=EnginesHashRing.user2topic(activity['user'])
+            topic=self._enginesHashRing.user2topic(activity['user'])
             if topic in self._workTopics:
                 logger.debug('Received activity from WORKTOPIC topic %s' % topic)
                 topicType='W'

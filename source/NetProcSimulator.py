@@ -9,6 +9,8 @@ from kazoo.client import KazooClient, KazooState
 import EnginesHashRing
 import logging
 
+NUMBER_OF_USERS = 10000 
+
 #logging.basicConfig(level=logging.ERROR)
 logging.basicConfig(filename='netproc.log', level=logging.ERROR)
 logger = logging.getLogger('NetProcSimulator')
@@ -103,7 +105,7 @@ class NetProcSimulator:
             newActivity={}
             newActivity['ID']=uuid.uuid4().get_node()
             newActivity['tenant']=random.choice(tanents)
-            user=('user%d' % (random.randint(0, 100)))
+            user=('user%d' % (random.randint(0, NUMBER_OF_USERS)))
             newActivity['user']=user
             if user in self._userSequence:
                 self._userSequence[user]=self._userSequence[user] + 1

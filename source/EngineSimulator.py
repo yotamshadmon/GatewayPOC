@@ -15,7 +15,7 @@ import random
 import time
 from cgi import log
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(filename='engine.log', level=logging.ERROR)
 logger = logging.getLogger('EngineSimulator')
 logger.setLevel(logging.INFO)
 
@@ -60,11 +60,15 @@ class PersistentDict(collections.MutableMapping):
             json.dump(self.store, fp)    
 
 class EngineSimulator:
-    def __init__(self, nodeid, port=8000, zookeeperAddr='127.0.0.1:2181', kafkaAddr='localhost:9092'):
+    def __init__(self, nodeid, port=8000, zookeeperAddr='127.0.0.1:2181', kafkaAddr='localhost:9092', hostIP=''):
         self._nodeid=nodeid
         self._workTopics=[]
         self._allTopics=[]
-        self._ipAddress=("%s:%d"%(socket.gethostbyname(socket.gethostname()), port))
+        if hostIP == '':
+            self._ipAddress=("%s:%d"%(socket.gethostbyname(socket.gethostname()), port))
+        else:
+            self._ipAddress=("%s:%d"%(hostIP, port))
+            
         self._nodeName=("engine_%d" % self._nodeid)
         self._progressVent='/'
 
@@ -385,10 +389,11 @@ if __name__ == "__main__":
     argParser.add_argument('-p', '--port', help='port', default=8000, type=int)    
     argParser.add_argument('-z', '--zookeeper', help='zookeeper', default='127.0.0.1:2181')    
     argParser.add_argument('-k', '--kafka', help='kafka', default='localhost:9092')    
+    argParser.add_argument('-hip', '--host', help='host ip', default='')    
     args = argParser.parse_args(sys.argv[1:])
     
     # create engine simulator and load topics from kafka
-    engineSim=EngineSimulator(uuid.uuid4(), args.port, args.zookeeper, args.kafka)
+    engineSim=EngineSimulator(uuid.uuid4(), args.port, args.zookeeper, args.kafka, args.host)
     engineSim.zkRegister()
     engineSim.zkWatch()
     engineSim.loadTopics()

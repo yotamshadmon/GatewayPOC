@@ -8,11 +8,10 @@ import sys
 from kazoo.client import KazooClient, KazooState
 import EnginesHashRing
 import logging
-from _cffi_backend import sizeof
 
-logging.basicConfig(level=logging.WARN)
+logging.basicConfig(filename='netproc.log', level=logging.ERROR)
 logger = logging.getLogger('NetProcSimulator')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 class NetProcSimulator:
     def __init__(self, zookeeperAddr='127.0.0.1:2181'):
@@ -95,7 +94,7 @@ class NetProcSimulator:
                         logger.error('Failed to send activity to BACKUP engine: %s' % engineAddress)
                         self._userSequence[activity['user']]=self._userSequence[activity['user']] - 1
                         time.sleep(0.5)
-                time.sleep(0.005)
+                time.sleep(0.05)
 
     def _randomActivity(self):
             tanents=['ForcePoint', 'SkyFence', 'Melanox', 'LivePerson', 'NICE', 'SAP']

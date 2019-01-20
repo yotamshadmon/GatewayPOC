@@ -19,7 +19,7 @@ import Statistics
 #logging.basicConfig(level=logging.ERROR)
 logging.basicConfig(filename='engine.log', level=logging.ERROR)
 logger = logging.getLogger('EngineSimulator')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.ERROR)
 
 class PersistentDict(collections.MutableMapping):
     def __init__(self, fileName):
@@ -62,10 +62,9 @@ class PersistentDict(collections.MutableMapping):
             json.dump(self.store, fp)    
 
 class EngineSimulator:
-    def __init__(self, nodeid, port=8000, zookeeperAddr='127.0.0.1:2181', kafkaAddr='localhost:9092', hostIP=''):
+    def __init__(self, port=8000, zookeeperAddr='127.0.0.1:2181', kafkaAddr='localhost:9092', hostIP=''):
         self._cadence=Statistics.Cadence('WRITE Activities per second')
         self._readCadence=Statistics.Cadence('READ Activities per second')
-        self._nodeid=nodeid
         self._workTopics=[]
         self._allTopics=[]
         if hostIP == '':
@@ -73,7 +72,7 @@ class EngineSimulator:
         else:
             self._ipAddress=("%s:%d"%(hostIP, port))
             
-        self._nodeName=("engine_%d" % self._nodeid)
+        self._nodeName=("engine_%s" % self._ipAddress)
         self._progressVent='/'
 
         # cache DBs
@@ -102,10 +101,10 @@ class EngineSimulator:
         logMsg={}
         logMsg['timestamp']=int(time.time()*1000)
         logMsg['text']="Engine registered to ZK"
-        logMsg['engineID']=('%s'%self._nodeid)
+        logMsg['engineIP']=self._ipAddress
         self._producer.send('logging', json.dumps(logMsg))
         
-#         zk.delete(("/Engines/engine_%d" % self._nodeid))
+#         zk.delete(("/Engines/engine_%d" % self._ipAddress))
 #         if zk.exists("/Engines"):
 #             data, stat = zk.get("/Engines")
 #             print("Version: %s, data: %s" % (stat.version, data.decode("utf-8")))
@@ -157,7 +156,7 @@ class EngineSimulator:
             logMsg={}
             logMsg['timestamp']=int(time.time()*1000)
             logMsg['text']="Engine ZK change notification"
-            logMsg['engineID']=('%s'%self._nodeid)
+            logMsg['engineIP']=self._ipAddress
             logMsg['workTopics']=self._workTopics
             logMsg['backupTopics']=backupTopics
             self._producer.send('logging', json.dumps(logMsg))
@@ -205,14 +204,14 @@ class EngineSimulator:
                 # check progress
                 startupCadence.inc()
                 msgCount = msgCount + 1
-                if msgCount % 1000 == 0:
+                if logger.getEffectiveLevel() <= logging.INFO and msgCount % 1000 == 0:
                     totalProgress, topicsProgress = self._checkLoadTopicsProgress(topicProgress, msg)
                     logger.info("Progress: %d%%, topics loaded: %d%%" % ((totalProgress*100), (topicsProgress*100)))
                     
                     logMsg={}
                     logMsg['timestamp']=int(time.time()*1000)
                     logMsg['text']="Engine startup progress"
-                    logMsg['engineID']=('%s'%self._nodeid)
+                    logMsg['engineIP']=self._ipAddress
                     logMsg['topics']=(topicsProgress*100)
                     logMsg['total']=(totalProgress*100)
                     self._producer.send('logging', json.dumps(logMsg))
@@ -230,7 +229,7 @@ class EngineSimulator:
         logMsg={}
         logMsg['timestamp']=int(time.time()*1000)
         logMsg['text']="Engine ready to ZK"
-        logMsg['engineID']=('%s'%self._nodeid)
+        logMsg['engineIP']=self._ipAddress
         self._producer.send('logging', json.dumps(logMsg))
 
     def _checkActivityUserSeq(self, newActivity, topic):
@@ -256,7 +255,7 @@ class EngineSimulator:
             logMsg={}
             logMsg['timestamp']=int(time.time()*1000)
             logMsg['text']="Activity userSequence ERROR"
-            logMsg['engineID']=('%s'%self._nodeid)
+            logMsg['engineIP']=self._ipAddress
             logMsg['difference']=pervSeq-(newSeq-1)
             logMsg['topic']=topic
             logMsg['user']=newActivity['user']
@@ -280,7 +279,7 @@ class EngineSimulator:
 #             logMsg={}
 #             logMsg['timestamp']=int(time.time()*1000)
 #             logMsg['text']="User topic"
-#             logMsg['engineID']=('%s'%self._nodeid)
+#             logMsg['engineIP']=self._ipAddress
 #             logMsg['topic']=topic
 #             logMsg['topicType']=topicType
 #             self._producer.send('logging', json.dumps(logMsg))
@@ -338,7 +337,7 @@ class EngineSimulator:
             logMsg={}
             logMsg['timestamp']=int(time.time()*1000)
             logMsg['text']=cadence.text()
-            logMsg['engineID']=('%s'%self._nodeid)
+            logMsg['engineIP']=self._ipAddress
             logMsg['seconds']=sec
             logMsg['count']=count
             logMsg['cadence']=cad
@@ -417,7 +416,7 @@ if __name__ == "__main__":
     args = argParser.parse_args(sys.argv[1:])
     
     # create engine simulator and load topics from kafka
-    engineSim=EngineSimulator(uuid.uuid4(), args.port, args.zookeeper, args.kafka, args.host)
+    engineSim=EngineSimulator(args.port, args.zookeeper, args.kafka, args.host)
     engineSim.zkRegister()
     engineSim.zkWatch()
     engineSim.loadTopics()

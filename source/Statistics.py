@@ -1,12 +1,16 @@
 import time
 
 class Cadence:
-    def __init__(self):
+    def __init__(self, text):
+        self._text = text
         self._start = int(round(time.time() * 1000))
         self._count = 0
         self._lastTime = self._start
         self._lastCount = 0
         
+    def text(self):
+        return self._text
+    
     def inc(self):
         self._count = self._count + 1
         self._lastCount = self._lastCount + 1

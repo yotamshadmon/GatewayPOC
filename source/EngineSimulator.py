@@ -63,7 +63,8 @@ class PersistentDict(collections.MutableMapping):
 
 class EngineSimulator:
     def __init__(self, nodeid, port=8000, zookeeperAddr='127.0.0.1:2181', kafkaAddr='localhost:9092', hostIP=''):
-        self._cadence=Statistics.Cadence()
+        self._cadence=Statistics.Cadence('WRITE Activities per second')
+        self._readCadence=Statistics.Cadence('READ Activities per second')
         self._nodeid=nodeid
         self._workTopics=[]
         self._allTopics=[]
@@ -190,6 +191,9 @@ class EngineSimulator:
         topicProgress={}
         for topic in self._allTopics:
             topicProgress[topic]={'offset':0, 'highwater':0}
+        
+        # initiate load cadence statistics object
+        startupCadence = Statistics.Cadence('Startup cadence')
             
         # build local DB from topics
         if len(self._allTopics) > 0:
@@ -199,6 +203,7 @@ class EngineSimulator:
                 self._localDbs[msg.topic][act['user']]=msg.value
                 
                 # check progress
+                startupCadence.inc()
                 msgCount = msgCount + 1
                 if msgCount % 1000 == 0:
                     totalProgress, topicsProgress = self._checkLoadTopicsProgress(topicProgress, msg)
@@ -215,6 +220,7 @@ class EngineSimulator:
                     if topicProgress > 0.9 and totalProgress > 0.9:
                         break
 
+        self._logStatistics(startupCadence)
         logger.info('loadTopics() ended   %s' % time.ctime(time.time()))
 
     def zkReady(self):
@@ -278,16 +284,7 @@ class EngineSimulator:
 #             logMsg['topic']=topic
 #             logMsg['topicType']=topicType
 #             self._producer.send('logging', json.dumps(logMsg))
-            if (self._cadence.inc() % 1000) == 0:
-                sec, count, cadence = self._cadence.getLastCadence()
-                logMsg={}
-                logMsg['timestamp']=int(time.time()*1000)
-                logMsg['text']="activities per sec"
-                logMsg['engineID']=('%s'%self._nodeid)
-                logMsg['seconds']=sec
-                logMsg['count']=count
-                logMsg['cadence']=cadence
-                self._producer.send('logging', json.dumps(logMsg))
+            self._logStatistics(self._cadence, 1000)
 
             self._checkActivityUserSeq(activity, topic)
             self._updateCache()
@@ -333,6 +330,20 @@ class EngineSimulator:
                         if prevSeq < dictActivity['userSequence']:
                             self._localDbs[tp.topic][dictActivity['user']] = msg.value
                 logger.debug(('READ:    %s: %s' % (tp.topic, msg.value)))
+                self._logStatistics(self._readCadence, 1000)
+                
+    def _logStatistics(self, cadence, logEvery = 0):
+        if logEvery == 0 or (cadence.inc() % logEvery) == 0:
+            sec, count, cad = cadence.getLastCadence()
+            logMsg={}
+            logMsg['timestamp']=int(time.time()*1000)
+            logMsg['text']=cadence.text()
+            logMsg['engineID']=('%s'%self._nodeid)
+            logMsg['seconds']=sec
+            logMsg['count']=count
+            logMsg['cadence']=cad
+            self._producer.send('logging', json.dumps(logMsg))
+        
 
     def _checkPercentLoaded(self):
         totalHighwater=0
